@@ -36,7 +36,6 @@ test('matchingEntry blocks exact sites and exact pages', () => {
   assert.equal(matchingEntry('https://www.youtube.com/watch?v=1', list), 'youtube.com')
   assert.equal(matchingEntry('https://reddit.com/r/foo/', list), 'reddit.com/r/foo')
   assert.equal(matchingEntry('https://reddit.com/r/bar', list), undefined)
-  // old "site/" entries keep blocking only the homepage
   assert.equal(matchingEntry('https://example.com/', list), 'example.com/')
   assert.equal(matchingEntry('https://example.com/about', list), undefined)
 })

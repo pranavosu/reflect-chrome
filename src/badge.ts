@@ -1,8 +1,3 @@
-// badge.ts shows how much allowed time is left on the active tab's site.
-//
-// While the active tab is an allowed site, the worker ticks once a second. The
-// tabs.query in each tick also keeps Chrome from stopping the worker mid-countdown.
-// Otherwise the ticker stops, and tab, window and storage events restart it.
 import { siteOf } from './sites'
 import { allowanceLeft, getStorage, onSettingsChanged } from './storage'
 import { Settings } from './types'
@@ -12,7 +7,6 @@ const BADGE_COLOUR: string = '#576ca8'
 type BadgeSettings = Pick<Settings, 'isEnabled' | 'whitelistedSites'>
 
 let ticker: ReturnType<typeof setInterval> | undefined
-// read once per worker lifetime and again whenever the relevant settings change
 let settings: Promise<BadgeSettings> | undefined
 let shownText: string | undefined
 

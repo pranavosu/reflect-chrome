@@ -1,6 +1,3 @@
-// nn.ts is reflect's original intent model: a small Keras LSTM classifier
-// (embedding -> LSTM -> LSTM -> dense -> dense -> sigmoid) trained in 2020.
-// Inference is written out in plain TypeScript, so it needs no ML library.
 import { IntentModel, lazyModel } from './intent_model'
 
 const SEQUENCE_LENGTH = 75
@@ -20,11 +17,6 @@ export function originalModel(name: string): IntentModel {
   )
 }
 
-// ---- tokenizer ----
-
-// the 2020 training pipeline also expanded contractions and dropped stop words,
-// but reflect's shipped inference never did. The model has always run on this
-// cleaning, so it stays as-is
 function clean(intent: string): string {
   return intent
     .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
@@ -32,9 +24,6 @@ function clean(intent: string): string {
     .replace(/\s{2,}/g, ' ')
 }
 
-// turn an intent into `length` word ids, left-padded with zeros; unknown words
-// are 0. Longer inputs keep the original model's quirk of dropping words from
-// both ends, since that's what it has always seen
 export function tokenize(
   wordMap: WordMap,
   intent: string,
@@ -51,12 +40,8 @@ export function tokenize(
   return padded
 }
 
-// ---- network ----
-
 export const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x))
 
-// Keras LSTM forward pass. Gates are packed as [input, forget, cell, output]
-// along the 4 * units axis of the kernel, recurrent kernel and bias.
 function lstm(
   sequence: Float32Array[],
   inputDim: number,
@@ -138,8 +123,6 @@ function forward(w: Weights, tokens: number[]): number {
   return sigmoid(out[0])
 }
 
-// ---- loading ----
-
 async function load(name: string): Promise<{ wordMap: WordMap; weights: Weights }> {
   const startTime = performance.now()
   const dir: string = chrome.runtime.getURL(`res/models/${name}/`)
@@ -148,7 +131,6 @@ async function load(name: string): Promise<{ wordMap: WordMap; weights: Weights 
     fetch(dir + 'tokenizer.json').then((r) => r.json()),
   ])
 
-  // weights are float32 arrays concatenated in manifest order
   const weights: Weights = {}
   for (const group of modelJson.weightsManifest) {
     const buffers: ArrayBuffer[] = await Promise.all(
@@ -165,7 +147,6 @@ async function load(name: string): Promise<{ wordMap: WordMap; weights: Weights 
     }
   }
 
-  // the tokenizer file is JSON-encoded twice
   const wordMap: WordMap = JSON.parse(JSON.parse(tokenizerJson).config.word_index)
   console.log(`Original model loaded in ${Math.floor(performance.now() - startTime)} ms`)
   return { wordMap, weights }

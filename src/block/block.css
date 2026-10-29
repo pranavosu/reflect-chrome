@@ -1,6 +1,3 @@
-/* block page styles. These live inside a closed shadow root, so the blocked
-   site's own CSS can't reach them and nothing here leaks out. */
-
 :host {
   all: initial;
   position: fixed;
@@ -55,7 +52,6 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* the blobs: the one moving, memorable thing on the page */
 .blobs {
   position: absolute;
   inset: 0;
@@ -79,8 +75,6 @@
   stop-color: var(--shade-bottom);
 }
 
-/* text column, left aligned, with a soft fade behind it so a stray blob
-   drifting under the text dissolves instead of covering it */
 .prompt {
   position: relative;
   isolation: isolate;
@@ -218,7 +212,6 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-/* narrow windows: blobs settle along the bottom, text keeps the top */
 @media (max-width: 719px) {
   .prompt {
     justify-content: flex-start;

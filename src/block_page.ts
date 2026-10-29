@@ -1,6 +1,3 @@
-// block_page.ts replaces a blocked site with reflect's block page. The page is
-// rendered into a closed shadow root, so the site's CSS and scripts can't
-// restyle or read it. Markup and styles are bundled in from src/block/.
 import BlobAnimation from './blob_animation'
 import blockHtml from './block/block.html'
 import blockCss from './block/block.css'
@@ -14,9 +11,7 @@ export interface BlockPageOptions {
   question: string
   blobs: boolean
   shadedBlobs: boolean
-  // asks for a verdict on the reason the user gave
   judge: (intent: string) => Promise<IntentResult>
-  // called once, when the user starts typing
   onFirstInput: () => void
 }
 
@@ -33,7 +28,6 @@ export function isBlockPageShown(): boolean {
 }
 
 export function showBlockPage(options: BlockPageOptions): void {
-  // stop the site loading and swap the whole document for a blank one
   window.stop()
   const html = document.documentElement
   for (const attr of Array.from(html.attributes)) html.removeAttribute(attr.name)
@@ -44,7 +38,6 @@ export function showBlockPage(options: BlockPageOptions): void {
   meta.content = 'width=device-width, initial-scale=1'
   const title = document.createElement('title')
   title.textContent = 'reflect.'
-  // @font-face doesn't work inside a shadow root, so fonts are declared here
   const fonts = document.createElement('style')
   fonts.textContent = `
     @font-face { font-family: circular; src: url(${chrome.runtime.getURL('res/circular.ttf')}); font-display: swap; }
@@ -62,8 +55,6 @@ export function showBlockPage(options: BlockPageOptions): void {
   const root = host.attachShadow({ mode: 'closed' })
   root.innerHTML = `<style>${blockCss}</style>${blockHtml}`
 
-  // some sites keep rewriting the document from scripts that already ran;
-  // put the block page back if that removes it
   new MutationObserver(() => {
     if (!host.isConnected) {
       document.documentElement.replaceChildren(head, body)
@@ -115,7 +106,6 @@ export function showBlockPage(options: BlockPageOptions): void {
     setBusy(true)
     const result: IntentResult = await options.judge(intent)
     if (result === 'ok') {
-      // the site is open now; reloading shows it
       setNote(`got it! ${minutesText} starting now.`, false, false)
       location.reload()
       return
@@ -126,7 +116,7 @@ export function showBlockPage(options: BlockPageOptions): void {
     input.value = ''
     input.focus()
     field.classList.remove('shake')
-    void field.offsetWidth // restart the animation
+    void field.offsetWidth
     field.classList.add('shake')
   })
 

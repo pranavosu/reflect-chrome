@@ -1,10 +1,3 @@
-// smart_model.ts is reflect's optional "smart" intent model.
-//
-// A small sentence-embedding model (all-MiniLM-L6-v2, ~23 MB, quantized) turns
-// the intent into a vector, and a logistic-regression head trained on the
-// original reflect data scores it. The embedding model is downloaded from
-// Hugging Face on first use and kept in the browser's Cache API afterwards;
-// everything runs locally. scripts/train-smart-head.mjs produces the head.
 import { env, pipeline, FeatureExtractionPipeline, ProgressInfo } from '@huggingface/transformers'
 import { IntentModel, lazyModel } from './intent_model'
 import { reportSmartModelStatus } from './messages'
@@ -32,9 +25,6 @@ export function smartModel(): IntentModel {
   })
 }
 
-// ONNX Runtime must load its WebAssembly from the extension, not a CDN. The
-// build aliases onnxruntime-web to its CPU-only bundle, which embeds the JS glue
-// so no dynamic import() is needed (service workers forbid it).
 function configureRuntime(): void {
   env.allowLocalModels = false
   env.useBrowserCache = true
@@ -58,7 +48,6 @@ async function load(): Promise<{ extractor: FeatureExtractionPipeline; head: Hea
       dtype: head.dtype,
       device: 'wasm',
       progress_callback: (p: ProgressInfo) => {
-        // report in 10% steps; each report wakes every open extension page
         const step = p.status === 'progress_total' ? Math.floor(p.progress / 10) * 10 : reported
         if (step !== reported) {
           reported = step

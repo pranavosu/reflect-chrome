@@ -1,10 +1,5 @@
-// blob_animation.ts draws the soft, gooey blobs on the block page. Blobs drift
-// away from the cursor and ease back to where they started.
-
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
-// below this width the text takes the top of the window and blobs the bottom.
-// keep in sync with the max-width media query in block/block.css
 const NARROW_WIDTH = 720
 
 const CONFIG = {
@@ -32,8 +27,6 @@ class Blob {
     this.render()
   }
 
-  // push away from the cursor and ease back toward the origin.
-  // returns whether the blob moved enough to be worth redrawing
   step(mouseX: number, mouseY: number): boolean {
     const dx = this.x - mouseX
     const dy = this.y - mouseY
@@ -89,7 +82,6 @@ export default class BlobAnimation {
     })
   }
 
-  // (re)seed blobs for the current window size and start animating
   start(): void {
     const width = window.innerWidth
     const height = window.innerHeight
@@ -104,14 +96,12 @@ export default class BlobAnimation {
     const radius = () => random(CONFIG.circleMinRadius, CONFIG.circleMaxRadius)
 
     for (let i = 0; i < CONFIG.numSeeds; i++) {
-      // wide windows: the right side; narrow windows: along the bottom
       const seed = narrow
         ? new Blob(random(width * 0.1, width), random(height * 0.8, height), radius())
         : new Blob(random(width * 0.58, width), random(height * 0.12, height * 0.88), radius())
       this.blobs.push(seed)
       for (let j = 0; j < CONFIG.childrenPerSeed; j++) {
         const range = CONFIG.childrenDistanceRange
-        // on narrow windows keep children below the fade behind the text
         const y = near(seed.originY, range)
         this.blobs.push(
           new Blob(near(seed.originX, range), narrow ? Math.max(y, height * 0.78) : y, radius())
@@ -120,12 +110,10 @@ export default class BlobAnimation {
     }
     this.group.append(...this.blobs.map((b) => b.element))
 
-    // settle into place once, then only animate in response to the cursor
     this.settle()
     this.wake()
   }
 
-  // move every blob one step; returns whether any of them moved
   private stepAll(): boolean {
     let moved = false
     for (const blob of this.blobs) {
@@ -138,7 +126,6 @@ export default class BlobAnimation {
     for (let i = 0; i < 120 && this.stepAll(); i++) {}
   }
 
-  // with no cursor over the page, blobs feel a gentle push from below
   private restMouse(): void {
     this.mouseX = window.innerWidth / 2
     this.mouseY = window.innerHeight * 2.5
@@ -149,7 +136,6 @@ export default class BlobAnimation {
     this.frame = requestAnimationFrame(this.tick)
   }
 
-  // redraw only while something is moving, so an idle block page costs nothing
   private tick = (): void => {
     this.frame = this.stepAll() ? requestAnimationFrame(this.tick) : 0
   }

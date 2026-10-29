@@ -37,8 +37,6 @@ h2 {
   max-width: 34rem;
 }
 
-/* sites */
-
 .add-site {
   display: flex;
   gap: 0.75rem;
@@ -94,8 +92,6 @@ h2 {
   background: var(--wash);
 }
 
-/* settings */
-
 .setting {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -146,8 +142,6 @@ h2 {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
-/* recent reasons */
 
 .history {
   width: 100%;

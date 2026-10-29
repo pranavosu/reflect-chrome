@@ -51,7 +51,6 @@ const saveSettings = () => {
     enableBlobs: enableBlobs,
     enable3D: enable3D,
   }).then(() => {
-    // Update status to let user know options were saved.
     const status = document.getElementById('statusContent')
     if (status === null) return
     status.textContent = 'options saved.'
@@ -63,15 +62,12 @@ const saveSettings = () => {
 
 export default () => {
   document.addEventListener('DOMContentLoaded', () => {
-    // getreflect.app's onboarding page is outside our control; if its layout
-    // has changed, leave it alone rather than inject into the wrong place
     const optionsDiv: HTMLElement | null = document.getElementById('options')
     const goToEndButton: HTMLElement | null = document.getElementById('page3button')
     if (optionsDiv === null || goToEndButton === null) {
       return
     }
 
-    // change last button to say it will skip rather than setting settings
     goToEndButton.innerText = 'skip.'
 
     const newOptionsSection: HTMLDivElement = document.createElement('div')

@@ -1,6 +1,3 @@
-// popup.ts drives the toolbar popup: the on/off switch, the current site's
-// state (including time left on an open site), and block/unblock actions.
-// Actions only write settings; the background reacts to the change.
 import { matchingEntry, pageOf, siteOf } from './sites'
 import {
   addToBlocked,
@@ -13,10 +10,8 @@ import {
 import { Settings } from './types'
 import { byId, showToggleShortcut } from './ui'
 
-// what the popup shows for the active tab
 type PopupView =
   | { kind: 'unblockable' }
-  // `page` is set when the URL has a path worth blocking on its own
   | { kind: 'open'; site: string; page: string | undefined }
   | {
       kind: 'blocked'

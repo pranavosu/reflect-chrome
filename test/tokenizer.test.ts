@@ -1,4 +1,3 @@
-// pins the original model's tokenizer to its pre-refactor output
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

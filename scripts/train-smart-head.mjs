@@ -1,13 +1,3 @@
-// Trains the classifier head for reflect's optional "smart" intent model.
-//
-// The smart model embeds an intent with a small sentence-embedding model
-// (all-MiniLM-L6-v2, run by Transformers.js) and scores the embedding with a
-// logistic-regression head. This script fits that head on the original reflect
-// training data and writes it to dist/res/models/minilm-l6-head.json.
-//
-// Data: https://github.com/jackyzha0/reflect-nlp (nlp/data/cumulative.csv, AGPL-3.0).
-//
-// Usage: node scripts/train-smart-head.mjs
 import { pipeline } from '@huggingface/transformers'
 import fs from 'node:fs'
 
@@ -17,7 +7,6 @@ const OUT = new URL('../dist/res/models/minilm-l6-head.json', import.meta.url)
 const MODEL = { id: 'Xenova/all-MiniLM-L6-v2', dtype: 'q8', pooling: 'mean', normalize: true }
 const LAMBDA = 0.1
 
-// minimal RFC 4180 CSV parser
 function parseCsv(text) {
   const rows = []
   let row = [],
@@ -82,7 +71,6 @@ function trainLR(X, y, { lambda, epochs = 1500, lr = 0.1 }) {
       else b -= step
     }
   }
-  // fold the standardization into the weights so inference is a plain dot product
   const weights = Array.from(w, (wj, j) => wj / std[j])
   const bias = b - weights.reduce((s, wj, j) => s + wj * mean[j], 0)
   return { weights, bias }
@@ -114,7 +102,6 @@ for (let i = 0; i < rows.length; i += 64) {
 }
 const y = rows.map(([, l]) => l)
 
-// grouped 5-fold cross-validation: identical texts always share a fold
 const norm = (s) => s.toLowerCase().split(/\s+/).filter(Boolean).join(' ')
 let seed = 7
 const rnd = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32

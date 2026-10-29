@@ -1,5 +1,3 @@
-// options.ts drives the options page. Every control saves as soon as it
-// changes; the page re-renders whenever storage changes.
 import { watchSmartModelStatus } from './messages'
 import { entryFor } from './sites'
 import {
@@ -33,8 +31,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   })
 })
 
-// ---- settings ----
-
 function fillControls(storage: Settings): void {
   byId<HTMLInputElement>('whitelistTime').value = String(storage.whitelistTime)
   byId<HTMLInputElement>('minIntentLength').value = String(storage.minIntentLength)
@@ -57,7 +53,6 @@ function save(values: SettingsUpdate): void {
   })
 }
 
-// read a number field, clamped to its min/max; null if it isn't a number yet
 function readNumber(id: string): number | null {
   const input = byId<HTMLInputElement>(id)
   const value = Math.round(Number(input.value))
@@ -101,13 +96,10 @@ function bindControls(): void {
   }
 }
 
-// ---- sites ----
-
 function bindSites(): void {
   byId<HTMLFormElement>('addSite').addEventListener('submit', async (event) => {
     event.preventDefault()
     const input = byId<HTMLInputElement>('siteInput')
-    // a pasted URL with a path blocks just that page
     const site: string | undefined = entryFor(input.value)
     const error = byId('siteError')
 
@@ -151,8 +143,6 @@ function renderSites(storage: Settings): void {
     list.append(item)
   }
 }
-
-// ---- recent reasons ----
 
 function formatWhen(date: Date): string {
   const sameDay = date.toDateString() === new Date().toDateString()
@@ -200,8 +190,6 @@ function renderHistory(storage: Settings): void {
   byId('historyRows').replaceChildren(...rows)
 }
 
-// ---- smart model status ----
-
 function bindSmartModelStatus(): void {
   const el = byId('smartModelStatus')
   watchSmartModelStatus((status) => {
@@ -213,8 +201,6 @@ function bindSmartModelStatus(): void {
         "couldn't load the model, so reflect is using the original one for now. it tries again the next time a block page opens."
   })
 }
-
-// ---- keyboard shortcut ----
 
 function showShortcut(): void {
   showToggleShortcut(byId('shortcutText'), 'no shortcut is set for turning reflect on or off.')
