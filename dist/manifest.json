@@ -1,34 +1,42 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "reflect. - a mindful website blocker",
   "description": "a website blocker that asks users to reflect on their usage.",
-  "version": "1.4.0",
+  "version": "2.0.0",
+  "minimum_chrome_version": "120",
   "options_page": "res/pages/options.html",
-  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'",
   "background": {
-    "scripts": ["src/background.js"],
-  	"persistent": true
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "icons": {
     "16": "res/icon.png",
     "48": "res/icon.png",
     "128": "res/icon.png"
   },
-  "browser_action": {
+  "action": {
     "default_icon": "res/icon.png",
     "default_popup": "res/pages/popup.html",
     "default_title": "open reflect. options"
   },
   "permissions": [
     "storage",
-    "<all_urls>",
     "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "content_scripts": [
     {
-      "matches": [ "*://*/*" ],
-      "js": ["jquery-3.4.1.min.js", "jquery-ui.min.js", "src/content.js"],
-      "css": ["res/fonts.css", "res/main.css"],
+      "matches": [
+        "*://*/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_start"
     }
   ],
@@ -39,6 +47,13 @@
     }
   },
   "web_accessible_resources": [
-    "res/*"
+    {
+      "resources": [
+        "res/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
   ]
 }

@@ -1,238 +1,115 @@
-import * as nn from './nn'
-import { cleanDomain } from './util'
-import { getStorage, setStorage, addToBlocked, addToWhitelist, removeFromBlocked } from './storage'
-import setupContextMenus from './context_menus'
-import { Intent } from './types'
-import { setBadgeUpdate, cleanupBadge } from './badge'
-import { listenForCommand } from './commands'
+// background.ts is the extension's MV3 service worker. Chrome may stop it
+// whenever it is idle, so every listener is registered synchronously at the top
+// level and state lives in storage, not in memory.
+//
+// Settings change from many places (popup, options, shortcut, context menus,
+// another synced device), so the worker reacts to storage changes instead of
+// being told about them.
+import { decideIntent, recordIntent, warmUpSelectedModel } from './intents'
+import { Message } from './messages'
+import { matchingEntry, pageOf, siteOf } from './sites'
+import {
+  DEFAULT_BLOCKED_SITES,
+  DEFAULTS,
+  addToBlocked,
+  getStorage,
+  onSettingsChanged,
+  setStorage,
+} from './storage'
+import createContextMenus, { MENU_BLOCK_PAGE, MENU_BLOCK_SITE } from './context_menus'
+import { listenForBadgeTriggers } from './badge'
 
-// On install script
-chrome.runtime.onInstalled.addListener((details) => {
-  // on first time install
-  if (details.reason === 'install') {
-    chrome.tabs.create({
-      // redir to onboarding url
-      url: 'http://getreflect.app/onboarding',
-      active: true,
-    })
+const ONBOARDING_URL: string = 'https://getreflect.app/onboarding/'
 
-    firstTimeSetup()
+// ---- lifecycle ----
+
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason === 'install') {
+    chrome.tabs.create({ url: ONBOARDING_URL, active: true })
+    await setStorage({ ...structuredClone(DEFAULTS), blockedSites: [...DEFAULT_BLOCKED_SITES] })
+  } else if (reason === 'update') {
+    await setStorage({ isEnabled: true })
   }
-
-  // on version update
-  const prevVersion: string = details.previousVersion
-  const thisVersion: string = chrome.runtime.getManifest().version
-  if (details.reason === 'update') {
-    turnFilteringOn()
-
-    if (prevVersion != thisVersion) {
-      chrome.tabs.create({
-        // redir to latest release patch notes
-        url: 'http://getreflect.app/latest',
-        active: true,
-      })
-
-      console.log(`Updated from ${prevVersion} to ${thisVersion}!`)
-    }
-  }
-
-  // set uninstall url
-  chrome.runtime.setUninstallURL('http://getreflect.app/uninstall')
+  // set explicitly: the icon resets on install and update, and storage.onChanged
+  // doesn't fire for writes that change nothing
+  setIcon((await getStorage()).isEnabled)
+  chrome.contextMenus.removeAll(createContextMenus)
 })
 
-function firstTimeSetup(): void {
-  // defualt to on
-  turnFilteringOn()
-
-  // set whitelist
-  const whitelist: { [key: string]: string } = {}
-  const intentList: { [key: string]: Intent } = {}
-  const blockedSites: string[] = ['facebook.com', 'twitter.com', 'instagram.com', 'youtube.com']
-
-  setStorage({
-    whitelistedSites: whitelist,
-    intentList: intentList,
-    whitelistTime: 5,
-    numIntentEntries: 20,
-    predictionThreshold: 0.5,
-    minIntentLength: 3,
-    customMessage: '',
-    enableBlobs: true,
-    enable3D: true,
-    blockedSites: blockedSites,
-    isEnabled: true,
-  }).then(() => {
-    console.log('Default values have been set.')
-  })
-
-  // set default badge background colour
-  chrome.browserAction.setBadgeBackgroundColor({
-    color: '#576ca8',
-  })
-}
-
-// On Chrome startup, setup extension icons
-chrome.runtime.onStartup.addListener(() => {
-  getStorage().then((storage) => {
-    let icon: string = 'res/icon.png'
-    if (storage.isEnabled) {
-      icon = 'res/on.png'
-    } else if (!storage.isEnabled) {
-      icon = 'res/off.png'
-    }
-
-    chrome.browserAction.setIcon({ path: { '16': icon } })
-  })
+chrome.runtime.onStartup.addListener(async () => {
+  setIcon((await getStorage()).isEnabled)
 })
 
-function turnFilteringOff(): void {
-  setStorage({ isEnabled: false }).then(() => {
-    // stop checking for badge updates
-    cleanupBadge()
-
-    chrome.browserAction.setIcon({ path: 'res/off.png' }, () => {
-      console.log('Filtering disabled')
-    })
-    reloadActive()
-  })
+// icon paths must be root-relative: the service worker lives in src/, and
+// Chrome resolves relative paths against the worker's own location
+function setIcon(enabled: boolean): void {
+  const path: string = enabled ? '/res/on.png' : '/res/off.png'
+  chrome.action.setIcon({ path }).catch((err) => console.warn('Could not set icon', err))
 }
 
-function turnFilteringOn(): void {
-  setStorage({ isEnabled: true }).then(() => {
-    // start badge update counter
-    setBadgeUpdate()
+// ---- reactions to setting changes ----
 
-    chrome.browserAction.setIcon({ path: 'res/on.png' }, () => {
-      console.log('Filtering enabled.')
-    })
-    reloadActive()
-  })
+onSettingsChanged(async (changes) => {
+  if (changes.isEnabled) {
+    setIcon(changes.isEnabled.newValue ?? DEFAULTS.isEnabled)
+    // the active tab may have just become blocked or unblocked
+    reloadActiveTabIfMatching((await getStorage()).blockedSites)
+  }
+  if (changes.blockedSites) {
+    const before = changes.blockedSites.oldValue ?? []
+    const after = changes.blockedSites.newValue ?? []
+    const added = after.filter((entry) => !before.includes(entry))
+    const removed = before.filter((entry) => !after.includes(entry))
+    reloadActiveTabIfMatching([...added, ...removed])
+  }
+  if (changes.intentModel?.newValue === 'smart') {
+    // start loading (and downloading, the first time) as soon as it's picked
+    warmUpSelectedModel()
+  }
+})
+
+async function reloadActiveTabIfMatching(entries: readonly string[]): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (tab?.id !== undefined && matchingEntry(tab.url, entries) !== undefined) {
+    chrome.tabs.reload(tab.id)
+  }
 }
 
-// reloads tab that is currently in focus
-function reloadActive(): void {
-  getStorage().then((storage) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const currentUrl = cleanDomain(tabs.map((tab) => tab.url))
-      if (storage.blockedSites.includes(currentUrl)) {
-        chrome.tabs.reload(tabs[0].id)
-      }
-    })
-  })
-}
+// ---- user actions that write settings ----
 
-// Catch menu clicks (page context and browser action context)
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  switch (info.menuItemId) {
-    case 'baFilterListMenu':
-      chrome.runtime.openOptionsPage()
-      break
-    case 'baAddSiteToFilterList':
-    case 'pgAddSiteToFilterList':
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const urls: string[] = tabs.map((x) => x.url)
-        addToBlocked(urls[0])
-      })
-      break
-    case 'baAddDomainToFilterList':
-    case 'pgAddDomainToFilterList':
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const urls: string[] = tabs.map((x) => x.url)
-        const domain: string = cleanDomain(urls)
-        addToBlocked(domain)
-      })
-      break
+  const url: string | undefined = tab?.url ?? info.pageUrl
+  if (info.menuItemId === MENU_BLOCK_PAGE) {
+    addToBlocked(pageOf(url))
+  } else if (info.menuItemId === MENU_BLOCK_SITE) {
+    addToBlocked(siteOf(url))
   }
 })
 
-// load context menus
-setupContextMenus()
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'toggle-blocker') {
+    const { isEnabled } = await getStorage()
+    await setStorage({ isEnabled: !isEnabled })
+  }
+})
 
-// Load ML model
-const model: nn.IntentClassifier = new nn.IntentClassifier('acc85.95')
+// ---- block pages ----
 
-// Listen for new signals from non-background scripts
-chrome.runtime.onConnect.addListener((port) => {
-  // check comm channel
-  switch (port.name) {
-    // listens for messages from content scripts
-    case 'intentStatus': {
-      port.onMessage.addListener((msg) => intentHandler(port, msg))
-    }
-
-    // listens for messages from popup
-    case 'toggleState': {
-      port.onMessage.addListener((msg) => toggleStateHandler(port, msg))
-    }
-
-    // listens for block from popup
-    case 'blockFromPopup': {
-      port.onMessage.addListener((msg) => blockFromPopupHandler(port, msg))
+chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+  switch (message.type) {
+    case 'warmUp':
+      // sent when you start typing, so the model is usually ready by the time you submit
+      warmUpSelectedModel()
+      return false
+    case 'intent': {
+      const site: string = siteOf(sender.tab?.url)
+      decideIntent(message.intent, site).then((result) => {
+        sendResponse(result)
+        return recordIntent(message.intent, site, result)
+      })
+      return true // reply asynchronously
     }
   }
 })
 
-// handle content script intent submission
-async function intentHandler(port: chrome.runtime.Port, msg) {
-  // extract intent and url from message
-  const intent: string = msg.intent
-
-  // get whitelist period
-  getStorage().then(async (storage) => {
-    const WHITELIST_PERIOD: number = storage.whitelistTime
-    const words: string[] = intent.split(' ')
-
-    if (words.length <= (storage.minIntentLength ?? 3)) {
-      // if too short, let content script know and early return
-      port.postMessage({ status: 'too_short' })
-      return
-    }
-
-    // send to nlp model for prediction
-    const valid: boolean = await model.predict(intent)
-    if (!valid) {
-      // if invalid, let content script know and early return
-      port.postMessage({ status: 'invalid' })
-      console.log('Failed. Remaining on page.')
-      return
-    }
-
-    // add whitelist period for site
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const urls: string[] = tabs.map((x) => x.url)
-      const domain: string = cleanDomain(urls)
-      addToWhitelist(domain, WHITELIST_PERIOD)
-    })
-
-    // send status to tab
-    port.postMessage({ status: 'ok' })
-    console.log(`Success! Redirecting`)
-  })
-}
-
-// handle keyboard shortcut
-listenForCommand(turnFilteringOn, turnFilteringOff)
-
-// handle user toggling extension on/off
-function toggleStateHandler(port: chrome.runtime.Port, msg) {
-  const on: boolean = msg.state
-  if (on) {
-    turnFilteringOn()
-  } else if (on === false) {
-    turnFilteringOff()
-  }
-}
-
-// handle user blocking current site from popup
-function blockFromPopupHandler(port: chrome.runtime.Port, msg) {
-  const url: string = msg.siteURL
-  const unblock: boolean = msg.unblock
-  if (url !== undefined && url !== '' && unblock !== undefined) {
-    if (unblock) {
-      removeFromBlocked(url)
-    } else if (!unblock) {
-      addToBlocked(url)
-    }
-    reloadActive()
-  }
-}
+listenForBadgeTriggers()

@@ -1,316 +1,172 @@
-// nn.ts is the definition for the NLP model
-import * as tf from '@tensorflow/tfjs'
-import { getStorage } from './storage'
+// nn.ts is reflect's original intent model: a small Keras LSTM classifier
+// (embedding -> LSTM -> LSTM -> dense -> dense -> sigmoid) trained in 2020.
+// Inference is written out in plain TypeScript, so it needs no ML library.
+import { IntentModel, lazyModel } from './intent_model'
 
-const stop_words: string[] = [
-  'i',
-  'me',
-  'my',
-  'myself',
-  'we',
-  'our',
-  'ours',
-  'ourselves',
-  'you',
-  'your',
-  'yours',
-  'yourself',
-  'yourselves',
-  'he',
-  'him',
-  'his',
-  'himself',
-  'she',
-  'her',
-  'hers',
-  'herself',
-  'it',
-  'its',
-  'itself',
-  'they',
-  'them',
-  'their',
-  'theirs',
-  'themselves',
-  'what',
-  'which',
-  'who',
-  'whom',
-  'this',
-  'that',
-  'these',
-  'those',
-  'am',
-  'is',
-  'are',
-  'was',
-  'were',
-  'be',
-  'been',
-  'being',
-  'have',
-  'has',
-  'had',
-  'having',
-  'do',
-  'does',
-  'did',
-  'doing',
-  'a',
-  'an',
-  'the',
-  'and',
-  'but',
-  'if',
-  'or',
-  'because',
-  'as',
-  'until',
-  'while',
-  'of',
-  'at',
-  'by',
-  'for',
-  'with',
-  'about',
-  'against',
-  'between',
-  'into',
-  'through',
-  'during',
-  'before',
-  'after',
-  'above',
-  'below',
-  'to',
-  'from',
-  'up',
-  'down',
-  'in',
-  'out',
-  'on',
-  'off',
-  'over',
-  'under',
-  'again',
-  'further',
-  'then',
-  'once',
-  'here',
-  'there',
-  'when',
-  'where',
-  'why',
-  'how',
-  'all',
-  'any',
-  'both',
-  'each',
-  'few',
-  'more',
-  'most',
-  'other',
-  'some',
-  'such',
-  'no',
-  'nor',
-  'only',
-  'own',
-  'same',
-  'so',
-  'than',
-  'too',
-  'very',
-  's',
-  't',
-  'can',
-  'will',
-  'just',
-  'don',
-  'should',
-  'now',
-  'd',
-  'll',
-  'm',
-  'o',
-  're',
-  've',
-  'y',
-  'ain',
-  'aren',
-  'couldn',
-  'didn',
-  'doesn',
-  'hadn',
-  'hasn',
-  'haven',
-  'isn',
-  'ma',
-  'mightn',
-  'mustn',
-  'needn',
-  'shan',
-  'shouldn',
-  'wasn',
-  'weren',
-  'won',
-  'wouldn',
-]
+const SEQUENCE_LENGTH = 75
+const EMBEDDING_SIZE = 64
 
-const contractions: Record<string, string> = {
-  im: 'i am',
-  ill: 'i will',
-  dont: 'do not',
-  havent: 'have not',
-  doesnt: 'does not',
-  "he'll": 'he will',
-  "she'll": 'she will',
+type Weights = { [name: string]: Float32Array }
+type WordMap = { [word: string]: number }
+
+interface ModelJson {
+  weightsManifest: { paths: string[]; weights: { name: string; shape: number[] }[] }[]
 }
 
-export class Tokenizer {
-  json_url: string // tokenizer json url
-  max_len: number // maximum sequence length
-  wordMap: Map<string, number> // mapping from word to token
+export function originalModel(name: string): IntentModel {
+  return lazyModel(
+    () => load(name),
+    ({ wordMap, weights }, intent) => forward(weights, tokenize(wordMap, intent))
+  )
+}
 
-  constructor(modelName: string, max_len: number) {
-    this.max_len = max_len
-    this.json_url = chrome.runtime.getURL('res/models/' + modelName + '/tokenizer.json')
+// ---- tokenizer ----
+
+// the 2020 training pipeline also expanded contractions and dropped stop words,
+// but reflect's shipped inference never did. The model has always run on this
+// cleaning, so it stays as-is
+function clean(intent: string): string {
+  return intent
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+    .toLowerCase()
+    .replace(/\s{2,}/g, ' ')
+}
+
+// turn an intent into `length` word ids, left-padded with zeros; unknown words
+// are 0. Longer inputs keep the original model's quirk of dropping words from
+// both ends, since that's what it has always seen
+export function tokenize(
+  wordMap: WordMap,
+  intent: string,
+  length: number = SEQUENCE_LENGTH
+): number[] {
+  const ids: number[] = clean(intent)
+    .split(' ')
+    .map((word) => (Object.hasOwn(wordMap, word) ? wordMap[word] : 0))
+  const padded: number[] = new Array(length).fill(0)
+  const shift: number = length - ids.length
+  for (let i = 0; i < Math.min(length, ids.length); i++) {
+    if (i + shift >= 0) padded[i + shift] = ids[i]
   }
+  return padded
+}
 
-  // fetch word mapping from tokenizer json
-  async load_from_json(): Promise<void> {
-    return fetch(this.json_url)
-      .then((response) => response.json())
-      .then((jsonString) => JSON.parse(jsonString))
-      .then((json) => json.config.word_index)
-      .then((wordMappingString) => {
-        this.wordMap = JSON.parse(wordMappingString)
-      })
+// ---- network ----
+
+export const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x))
+
+// Keras LSTM forward pass. Gates are packed as [input, forget, cell, output]
+// along the 4 * units axis of the kernel, recurrent kernel and bias.
+function lstm(
+  sequence: Float32Array[],
+  inputDim: number,
+  units: number,
+  kernel: Float32Array,
+  recurrentKernel: Float32Array,
+  bias: Float32Array
+): Float32Array[] {
+  const h = new Float32Array(units)
+  const c = new Float32Array(units)
+  const z = new Float32Array(4 * units)
+  const outputs: Float32Array[] = []
+
+  for (const x of sequence) {
+    z.set(bias)
+    for (let k = 0; k < inputDim; k++) {
+      const xk = x[k]
+      if (xk === 0) continue
+      const row = k * 4 * units
+      for (let j = 0; j < 4 * units; j++) z[j] += xk * kernel[row + j]
+    }
+    for (let k = 0; k < units; k++) {
+      const hk = h[k]
+      if (hk === 0) continue
+      const row = k * 4 * units
+      for (let j = 0; j < 4 * units; j++) z[j] += hk * recurrentKernel[row + j]
+    }
+    for (let j = 0; j < units; j++) {
+      const i = sigmoid(z[j])
+      const f = sigmoid(z[units + j])
+      const g = Math.tanh(z[2 * units + j])
+      const o = sigmoid(z[3 * units + j])
+      c[j] = f * c[j] + i * g
+      h[j] = o * Math.tanh(c[j])
+    }
+    outputs.push(Float32Array.from(h))
   }
+  return outputs
+}
 
-  private cleanStopWords(inputIntent: string): string {
-    const split: string[] = inputIntent.split(' ')
-    split.filter((word) => {
-      return stop_words.includes(word)
-    })
-
-    return split.join(' ')
+function dense(
+  x: Float32Array,
+  inputDim: number,
+  outputDim: number,
+  kernel: Float32Array,
+  bias: Float32Array
+): Float32Array {
+  const y = Float32Array.from(bias)
+  for (let k = 0; k < inputDim; k++) {
+    const xk = x[k]
+    const row = k * outputDim
+    for (let j = 0; j < outputDim; j++) y[j] += xk * kernel[row + j]
   }
+  return y
+}
 
-  private expandContractions(inputIntent: string): string {
-    const split: string[] = inputIntent.split(' ')
-    split.map((word) => {
-      if (contractions.hasOwnProperty(word)) {
-        return contractions[word]
-      } else {
-        return word
-      }
-    })
+function forward(w: Weights, tokens: number[]): number {
+  const embedded: Float32Array[] = tokens.map((t) =>
+    w['embedding_1/embeddings'].subarray(t * EMBEDDING_SIZE, (t + 1) * EMBEDDING_SIZE)
+  )
+  const seq1 = lstm(
+    embedded,
+    64,
+    64,
+    w['lstm_1/kernel'],
+    w['lstm_1/recurrent_kernel'],
+    w['lstm_1/bias']
+  )
+  const seq2 = lstm(
+    seq1,
+    64,
+    64,
+    w['lstm_2/kernel'],
+    w['lstm_2/recurrent_kernel'],
+    w['lstm_2/bias']
+  )
+  const fc1 = dense(seq2[seq2.length - 1], 64, 256, w['FC1/kernel'], w['FC1/bias'])
+  const out = dense(fc1, 256, 1, w['out_layer/kernel'], w['out_layer/bias'])
+  return sigmoid(out[0])
+}
 
-    return split.join(' ')
-  }
+// ---- loading ----
 
-  private cleanStr(inputIntent: string): string {
-    // strip punctuation
-    const noPunc: string = inputIntent.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
+async function load(name: string): Promise<{ wordMap: WordMap; weights: Weights }> {
+  const startTime = performance.now()
+  const dir: string = chrome.runtime.getURL(`res/models/${name}/`)
+  const [modelJson, tokenizerJson]: [ModelJson, string] = await Promise.all([
+    fetch(dir + 'model.json').then((r) => r.json()),
+    fetch(dir + 'tokenizer.json').then((r) => r.json()),
+  ])
 
-    // strip capitalization
-    const lower: string = noPunc.toLowerCase()
+  // weights are float32 arrays concatenated in manifest order
+  const weights: Weights = {}
+  for (const group of modelJson.weightsManifest) {
+    const buffers: ArrayBuffer[] = await Promise.all(
+      group.paths.map((p) => fetch(dir + p).then((r) => r.arrayBuffer()))
+    )
+    const data = new Uint8Array(buffers.reduce((n, b) => n + b.byteLength, 0))
+    buffers.reduce((offset, b) => (data.set(new Uint8Array(b), offset), offset + b.byteLength), 0)
 
-    // expand contractions
-    const expanded: string = this.expandContractions(lower)
-
-    // clean stop words
-    const clean: string = this.cleanStopWords(expanded)
-
-    // cleanup leftover spaces (2+ spaces to 1)
-    return clean.replace(/\s{2,}/g, ' ')
-  }
-
-  lookup(key: string): number {
-    const val: number | undefined = this.wordMap[key]
-    if (val === undefined) {
-      return 0
-    } else {
-      return val
+    let offset = 0
+    for (const spec of group.weights) {
+      const size: number = spec.shape.reduce((a, b) => a * b, 1)
+      weights[spec.name] = new Float32Array(data.buffer, offset, size)
+      offset += size * 4
     }
   }
 
-  // ensure sequence is of max length by padding with zeroes
-  pad(tokens: number[]): number[] {
-    const paddedArray: number[] = Array(this.max_len).fill(0, 0, this.max_len)
-
-    for (var i = 0; i < paddedArray.length; i++) {
-      if (tokens[i] !== undefined) {
-        paddedArray[i + (this.max_len - tokens.length)] = tokens[i]
-      }
-    }
-
-    return paddedArray
-  }
-
-  tokenize(intent: string): number[] {
-    // clean string and split into array
-    const splitString: string[] = this.cleanStr(intent).split(' ')
-
-    // lookup each item and return
-    const tokens: number[] = splitString.map((word) => this.lookup(word))
-    return this.pad(tokens)
-  }
-}
-
-// Load local ML Model
-export class IntentClassifier {
-  model: tf.LayersModel
-  modelName: string
-  tokenizer: Tokenizer
-  threshold: number
-
-  constructor(modelName: string, seq_max_len: number = 75) {
-    this.tokenizer = new Tokenizer(modelName, seq_max_len)
-    this.modelName = modelName
-    this.loadModel(this.modelName)
-  }
-
-  async predict(intent: string): Promise<boolean> {
-    // tokenize and convert to 1d tensor
-    const tokens: number[] = this.tokenizer.tokenize(intent)
-    const inputTensor: tf.Tensor = tf.tensor2d([tokens])
-
-    // predict
-    const predictionTensor: tf.Tensor = this.model.predict(inputTensor) as tf.Tensor
-
-    return getStorage().then((storage) => {
-      return predictionTensor.data().then((predictions) => {
-        // garbage collect finished tensor to prevent mem leak
-        tf.dispose(inputTensor)
-
-        // threshold net output
-        const confidence: number = predictions[0]
-        return confidence > (storage.predictionThreshold ?? 0.5)
-      })
-    })
-  }
-
-  async loadModel(modelName: string) {
-    console.log('Loading model...')
-
-    // start a performance timer
-    const startTime = performance.now()
-
-    // attempt to load model
-    const modelDir = chrome.runtime.getURL('res/models/' + modelName + '/model.json')
-    this.model = await tf.loadLayersModel(modelDir)
-
-    // initialize tokenizer
-    await this.tokenizer.load_from_json()
-
-    const totalTime = Math.floor(performance.now() - startTime)
-    console.log(`Model loaded and initialized in ${totalTime} ms...`)
-
-    // Warms up the model by causing intermediate tensor values
-    // to be built and pushed to GPU.
-    this.predict('')
-    console.log('Model warmed.')
-  }
+  // the tokenizer file is JSON-encoded twice
+  const wordMap: WordMap = JSON.parse(JSON.parse(tokenizerJson).config.word_index)
+  console.log(`Original model loaded in ${Math.floor(performance.now() - startTime)} ms`)
+  return { wordMap, weights }
 }

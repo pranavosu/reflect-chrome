@@ -1,0 +1,249 @@
+/* shared styles for reflect's popup and options pages */
+
+@font-face {
+  font-family: circular;
+  src: url('circular.ttf');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: circular-lt;
+  src: url('circular-light.ttf');
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+  --paper: #ffffff;
+  --wash: #f3f5fb;
+  --line: #dfe4f2;
+  --shale: #576ca8;
+  --on-shale: #ffffff;
+  --mist: #8b9ac0;
+  --coral: #d93a3f;
+  --ring: rgb(87 108 168 / 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #10162b;
+    --wash: #171f3a;
+    --line: #263159;
+    --shale: #c3cdf0;
+    --on-shale: #10162b;
+    --mist: #7685b5;
+    --coral: #ff8a8a;
+    --ring: rgb(195 205 240 / 0.35);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--shale);
+  font:
+    400 1rem/1.5 circular-lt,
+    system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: circular, system-ui, sans-serif;
+  font-weight: 400;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.wordmark {
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* buttons */
+
+.button {
+  display: inline-block;
+  padding: 0.55rem 1.3rem;
+  border: 1.5px solid var(--shale);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--shale);
+  font:
+    400 1rem/1.4 circular,
+    system-ui,
+    sans-serif;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.button:hover {
+  background: var(--wash);
+}
+
+.button.primary {
+  background: var(--shale);
+  color: var(--on-shale);
+}
+
+.button.primary:hover {
+  background: color-mix(in srgb, var(--shale) 86%, var(--paper));
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--shale);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+/* text and number fields */
+
+.input {
+  padding: 0.55rem 1.1rem;
+  border: 1.5px solid var(--shale);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--shale);
+  font: inherit;
+}
+
+.input::placeholder {
+  color: var(--mist);
+  opacity: 1;
+}
+
+.input:focus-visible {
+  outline-offset: 2px;
+}
+
+/* on/off switch: a real checkbox, visually replaced by a track */
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 2.75rem;
+  height: 1.5rem;
+  border: 2px solid var(--shale);
+  border-radius: 999px;
+  transition: background-color 0.2s;
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--shale);
+  transition:
+    transform 0.2s,
+    background-color 0.2s;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--shale);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(1.25rem);
+  background: var(--paper);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+/* range slider */
+
+input[type='range'] {
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line);
+  appearance: none;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: var(--shale);
+  appearance: none;
+}
+
+kbd {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--wash);
+  font:
+    400 0.95em circular,
+    system-ui,
+    sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

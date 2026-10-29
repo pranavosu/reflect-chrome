@@ -1,5 +1,5 @@
 import { getStorage, setStorage } from './storage'
-import { createDivFromHTML, insertAfter, getElementFromForm } from './util'
+import { byId } from './ui'
 
 const getSettingsHTMLString = () => {
   return `
@@ -42,9 +42,9 @@ const getSettingsHTMLString = () => {
 }
 
 const saveSettings = () => {
-  const whitelistTime: number = getElementFromForm('whitelistTime').value
-  const enableBlobs: boolean = getElementFromForm('enableBlobs').checked
-  const enable3D: boolean = getElementFromForm('enable3D').checked
+  const whitelistTime: number = Number(byId<HTMLInputElement>('whitelistTime').value)
+  const enableBlobs: boolean = byId<HTMLInputElement>('enableBlobs').checked
+  const enable3D: boolean = byId<HTMLInputElement>('enable3D').checked
 
   setStorage({
     whitelistTime: whitelistTime,
@@ -53,6 +53,7 @@ const saveSettings = () => {
   }).then(() => {
     // Update status to let user know options were saved.
     const status = document.getElementById('statusContent')
+    if (status === null) return
     status.textContent = 'options saved.'
     setTimeout(() => {
       status.textContent = ''
@@ -62,27 +63,33 @@ const saveSettings = () => {
 
 export default () => {
   document.addEventListener('DOMContentLoaded', () => {
-    getStorage().then((storage) => {
-      getElementFromForm('whitelistTime').value = storage.whitelistTime
-      getElementFromForm('enableBlobs').checked = storage.enableBlobs ?? true
-      getElementFromForm('enable3D').checked = storage.enable3D ?? true
-    })
-
-    const optionsDiv: HTMLElement = document.getElementById('options')
+    // getreflect.app's onboarding page is outside our control; if its layout
+    // has changed, leave it alone rather than inject into the wrong place
+    const optionsDiv: HTMLElement | null = document.getElementById('options')
+    const goToEndButton: HTMLElement | null = document.getElementById('page3button')
+    if (optionsDiv === null || goToEndButton === null) {
+      return
+    }
 
     // change last button to say it will skip rather than setting settings
-    const goToEndButton: HTMLElement = document.getElementById('page3button')
     goToEndButton.innerText = 'skip.'
 
-    const newOptionsSection: HTMLElement = createDivFromHTML(`
+    const newOptionsSection: HTMLDivElement = document.createElement('div')
+    newOptionsSection.innerHTML = `
             <div class="text-section">
                 <h2>configure.</h2>
                 <p>buttons and knobs to customize your reflect experience.</p>
                 ${getSettingsHTMLString()}
                 <a id="saveButton" class="lt-hover white_button shadow nextPage">save!</a>
             </div>
-            `)
-    insertAfter(newOptionsSection, optionsDiv)
-    document.getElementById('saveButton').addEventListener('click', saveSettings)
+            `
+    optionsDiv.after(newOptionsSection)
+    newOptionsSection.querySelector('#saveButton')?.addEventListener('click', saveSettings)
+
+    getStorage().then((storage) => {
+      byId<HTMLInputElement>('whitelistTime').value = String(storage.whitelistTime)
+      byId<HTMLInputElement>('enableBlobs').checked = storage.enableBlobs
+      byId<HTMLInputElement>('enable3D').checked = storage.enable3D
+    })
   })
 }

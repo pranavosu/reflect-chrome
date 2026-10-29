@@ -1,0 +1,251 @@
+/* block page styles. These live inside a closed shadow root, so the blocked
+   site's own CSS can't reach them and nothing here leaks out. */
+
+:host {
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: block;
+  color-scheme: light dark;
+
+  --paper: #ffffff;
+  --shale: #576ca8;
+  --on-shale: #ffffff;
+  --mist: #8b9ac0;
+  --coral: #d93a3f;
+  --field: #ffffff;
+  --shade-top: #a6b5da;
+  --shade-bottom: #7389c4;
+  --flat: #a6b1ce;
+  --ring: rgb(87 108 168 / 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --paper: #10162b;
+    --shale: #c3cdf0;
+    --on-shale: #10162b;
+    --mist: #7685b5;
+    --coral: #ff8a8a;
+    --field: #161e3a;
+    --shade-top: #5d70b3;
+    --shade-bottom: #33447f;
+    --flat: #46579a;
+    --ring: rgb(195 205 240 / 0.35);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.page {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--shale);
+  font:
+    400 16px/1.5 circular-lt,
+    system-ui,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* the blobs: the one moving, memorable thing on the page */
+.blobs {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.blobs circle {
+  fill: url(#shade);
+}
+
+.blobs.flat circle {
+  fill: var(--flat);
+}
+
+.shade-top {
+  stop-color: var(--shade-top);
+}
+
+.shade-bottom {
+  stop-color: var(--shade-bottom);
+}
+
+/* text column, left aligned, with a soft fade behind it so a stray blob
+   drifting under the text dissolves instead of covering it */
+.prompt {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100%;
+  width: min(100%, 44rem);
+  padding: 3rem clamp(1.5rem, 12vw, 12rem);
+}
+
+.prompt::before {
+  content: '';
+  position: absolute;
+  inset: 0 -10rem 0 0;
+  z-index: -1;
+  background: linear-gradient(to right, var(--paper) 62%, transparent);
+}
+
+.wordmark {
+  margin: 0;
+  font:
+    400 clamp(3.5rem, 7.5vw, 5.75rem) / 1 circular,
+    system-ui,
+    sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.question {
+  margin: 0.75rem 0 0;
+  font-size: 1.4rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.intent {
+  margin-top: 3.25rem;
+}
+
+.field {
+  display: flex;
+  gap: 0.75rem;
+  max-width: 34rem;
+}
+
+.field.shake {
+  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.85rem 1.4rem;
+  border: 1.5px solid var(--shale);
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--shale);
+  font: inherit;
+  font-size: 1.05rem;
+}
+
+input::placeholder {
+  color: var(--mist);
+  opacity: 1;
+}
+
+button {
+  flex: none;
+  padding: 0 1.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--shale);
+  color: var(--on-shale);
+  font:
+    400 1.05rem circular,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+button:hover {
+  background: color-mix(in srgb, var(--shale) 86%, var(--paper));
+}
+
+button:disabled {
+  background: var(--mist);
+  cursor: progress;
+}
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.note {
+  min-height: 1.5em;
+  margin: 1rem 0 0 1.45rem;
+  font-size: 0.95rem;
+}
+
+.note.error {
+  color: var(--coral);
+}
+
+.options-link {
+  width: fit-content;
+  margin-top: 3rem;
+  color: var(--shale);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* narrow windows: blobs settle along the bottom, text keeps the top */
+@media (max-width: 719px) {
+  .prompt {
+    justify-content: flex-start;
+    padding-top: 18vh;
+  }
+
+  .prompt::before {
+    inset: 0;
+    background: linear-gradient(to bottom, var(--paper) 62%, transparent 74%);
+  }
+
+  .field {
+    flex-direction: column;
+  }
+
+  button {
+    padding: 0.8rem 1.6rem;
+    align-self: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field.shake {
+    animation: none;
+  }
+
+  button {
+    transition: none;
+  }
+}

@@ -1,56 +1,13 @@
-// context_menus.ts is a module whose only job is to create the browser context menus
+// context_menus.ts creates the "Block this:" menu on pages and on the toolbar
+// icon; background.ts handles the clicks. Call it from runtime.onInstalled
+// only: menus persist across worker restarts.
 
-// closure around createContextMenus to ensure
-// it will only ever be called once
-export default () => {
-  var setupBefore: boolean = false
-  return () => {
-    if (!setupBefore) {
-      setupBefore = true
-      createContextMenus()
-    }
-  }
-}
+export const MENU_BLOCK_PAGE: string = 'block-page'
+export const MENU_BLOCK_SITE: string = 'block-site'
 
-function createContextMenus(): void {
-  // browser actions
-  chrome.contextMenus.create({
-    id: 'baAddToFilterList',
-    title: 'Block this:',
-    contexts: ['browser_action'],
-  })
-
-  chrome.contextMenus.create({
-    parentId: 'baAddToFilterList',
-    id: 'baAddSiteToFilterList',
-    title: 'Page',
-    contexts: ['browser_action'],
-  })
-
-  chrome.contextMenus.create({
-    parentId: 'baAddToFilterList',
-    id: 'baAddDomainToFilterList',
-    title: 'Domain',
-    contexts: ['browser_action'],
-  })
-
-  chrome.contextMenus.create({
-    id: 'pgAddToFilterList',
-    title: 'Block this:',
-    contexts: ['page'],
-  })
-
-  chrome.contextMenus.create({
-    parentId: 'pgAddToFilterList',
-    id: 'pgAddSiteToFilterList',
-    title: 'Page',
-    contexts: ['page'],
-  })
-
-  chrome.contextMenus.create({
-    parentId: 'pgAddToFilterList',
-    id: 'pgAddDomainToFilterList',
-    title: 'Domain',
-    contexts: ['page'],
-  })
+export default function createContextMenus(): void {
+  const contexts: chrome.contextMenus.CreateProperties['contexts'] = ['action', 'page']
+  chrome.contextMenus.create({ id: 'block', title: 'Block this:', contexts })
+  chrome.contextMenus.create({ parentId: 'block', id: MENU_BLOCK_PAGE, title: 'Page', contexts })
+  chrome.contextMenus.create({ parentId: 'block', id: MENU_BLOCK_SITE, title: 'Domain', contexts })
 }

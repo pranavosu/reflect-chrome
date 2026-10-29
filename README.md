@@ -17,7 +17,7 @@ when you attempt to visit distracting websites, reflect will ask you what your i
 ## Building the project
 1. Install the package dependencies by doing `npm i`
 2. Run `npm run build`
-3. Load the extension in the Chrome Extensions menu
+3. Load the extension in the Chrome Extensions menu (Chrome 120 or newer)
    * Go to extensions > enable developer mode (top right corner)
    * Click load unpacked, select the `dist` folder
 ## Developing
@@ -27,11 +27,19 @@ When developing, you will likely want to use a different workflow that is slight
 2. Reload extension in the Chrome Extensions menu
    * Go to extension > under reflect, press the refresh icon
 
-### Using different intent classifiers
+Run the unit tests with `npm test`. They cover site matching, storage helpers, model loading, and pin the original model's tokenizer to its exact output.
 
-You can find the latest models on our NLP repository here [https://github.com/jackyzha0/reflect-nlp](https://github.com/jackyzha0/reflect-nlp) inside the `nlp` folder. To convert a model, just run `./convert_to_js.sh <model_name>` and drop the result into `dist/res/models/` and call it in `src/background.ts`:
+### Intent models
 
-```typescript
-// Load ML model stuff
-const model: IntentClassifier = new IntentClassifier('acc84.78')
+reflect decides whether an intent is productive with one of two models, picked under "smart model." on the options page:
+
+- **Original (default).** The 2020 LSTM classifier in `dist/res/models/acc85.95`, run by a small dependency-free TypeScript forward pass in `src/nn.ts`. It knows about 840 words and answers instantly.
+- **Smart (opt-in).** The [all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) sentence-embedding model, run on-device by [Transformers.js](https://github.com/huggingface/transformers.js), plus a small logistic-regression head in `dist/res/models/minilm-l6-head.json`. The embedding model (about 23 MB) downloads from Hugging Face the first time it is enabled and is cached by the browser after that. If it can't load, reflect falls back to the original model.
+
+The smart model's head is trained on the original reflect data from [reflect-nlp](https://github.com/jackyzha0/reflect-nlp) (AGPL-3.0). To retrain it:
+
+```shell
+npm run train:smart-head
 ```
+
+Build output (`dist/src/` and ONNX Runtime's WebAssembly file in `dist/ort/`) is not checked in, so run `npm run build` after cloning, before loading the extension.

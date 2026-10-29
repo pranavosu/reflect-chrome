@@ -1,115 +1,126 @@
-import { getStorage } from './storage'
-import { cleanDomain } from './util'
+// popup.ts drives the toolbar popup: the on/off switch, the current site's
+// state (including time left on an open site), and block/unblock actions.
+// Actions only write settings; the background reacts to the change.
+import { matchingEntry, pageOf, siteOf } from './sites'
+import {
+  addToBlocked,
+  allowanceLeft,
+  getStorage,
+  onSettingsChanged,
+  removeFromBlocked,
+  setStorage,
+} from './storage'
+import { Settings } from './types'
+import { byId, showToggleShortcut } from './ui'
 
-// when popup is loaded, setup event listeners
-document.addEventListener('DOMContentLoaded', () => {
-  // setup listener for toggle
-  const toggleSwitch: HTMLInputElement = document.querySelector(
-    '#reflect-toggle'
-  ) as HTMLInputElement
-  toggleSwitch.addEventListener('change', toggleState, false)
+// what the popup shows for the active tab
+type PopupView =
+  | { kind: 'unblockable' }
+  // `page` is set when the URL has a path worth blocking on its own
+  | { kind: 'open'; site: string; page: string | undefined }
+  | {
+      kind: 'blocked'
+      entry: string
+      name: string
+      isPage: boolean
+      status: 'off' | 'blocked' | { openUntil: number }
+    }
 
-  // get current state and set approriately
-  getStorage().then((storage) => {
-    // set toggle state to storage value
-    toggleSwitch.checked = storage.isEnabled
-    setupBlockListener(storage.blockedSites)
+function popupView(settings: Settings, url: string | undefined, now: number): PopupView {
+  const site: string = siteOf(url)
+  if (site === '') {
+    return { kind: 'unblockable' }
+  }
+  const page: string = pageOf(url)
+  const entry: string | undefined = matchingEntry(url, settings.blockedSites)
+  if (entry === undefined) {
+    return { kind: 'open', site, page: page === site ? undefined : page }
+  }
+
+  const left: number = allowanceLeft(settings.whitelistedSites, site)
+  const isPage: boolean = entry !== site
+  return {
+    kind: 'blocked',
+    entry,
+    name: isPage ? page : site,
+    isPage,
+    status: !settings.isEnabled ? 'off' : left > 0 ? { openUntil: now + left } : 'blocked',
+  }
+}
+
+let tabUrl: string | undefined
+let view: PopupView = { kind: 'unblockable' }
+let countdown: number = 0
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  tabUrl = tab?.url
+
+  const enabled = byId<HTMLInputElement>('enabled')
+  enabled.addEventListener('change', () => setStorage({ isEnabled: enabled.checked }))
+  byId('blockSite').addEventListener('click', () => {
+    if (view.kind === 'open') addToBlocked(view.site)
+    if (view.kind === 'blocked') removeFromBlocked(view.entry)
   })
+  byId('blockPage').addEventListener('click', () => {
+    if (view.kind === 'open' && view.page !== undefined) addToBlocked(view.page)
+  })
+
+  showToggleShortcut(byId('shortcut'))
+  render(await getStorage())
+  onSettingsChanged(async () => render(await getStorage()))
 })
 
-// function to update background with current toggle state
-function toggleState(e) {
-  const port: chrome.runtime.Port = chrome.runtime.connect({
-    name: 'toggleState',
-  })
+function render(settings: Settings): void {
+  view = popupView(settings, tabUrl, Date.now())
+  byId<HTMLInputElement>('enabled').checked = settings.isEnabled
+  byId('enabledLabel').textContent = settings.isEnabled ? 'on.' : 'off.'
 
-  port.postMessage({ state: e.target.checked })
-  port.disconnect()
+  const blockSite = byId<HTMLButtonElement>('blockSite')
+  const blockPage = byId<HTMLButtonElement>('blockPage')
+  window.clearInterval(countdown)
+
+  switch (view.kind) {
+    case 'unblockable':
+      byId('siteName').textContent = 'this page.'
+      setState("reflect can't block browser pages.")
+      blockSite.hidden = blockPage.hidden = true
+      break
+
+    case 'open':
+      byId('siteName').textContent = view.site
+      setState('not blocked.')
+      blockSite.hidden = false
+      blockSite.textContent = `block ${view.site}.`
+      blockSite.classList.add('primary')
+      blockPage.hidden = view.page === undefined
+      break
+
+    case 'blocked':
+      byId('siteName').textContent = view.name
+      blockSite.hidden = false
+      blockSite.textContent = view.isPage ? 'unblock this page.' : `unblock ${view.entry}.`
+      blockSite.classList.remove('primary')
+      blockPage.hidden = true
+      if (view.status === 'off') setState('blocked, but reflect is off.')
+      else if (view.status === 'blocked') setState('blocked.')
+      else startCountdown(view.status.openUntil)
+      break
+  }
 }
 
-// updates the popup button when blocked or unblocked
-function updateButton(unblock: boolean) {
-  document.getElementById('block').innerHTML = unblock ? 'block page.' : 'unblock page.'
-  document.getElementById('block').style.borderRadius = unblock ? '5px 0 0 5px' : '5px'
-  document.getElementById('dropdown').style.display = unblock ? 'block' : 'none'
+function setState(text: string): void {
+  byId('siteState').textContent = text
 }
 
-// setup listener for what block button should do
-function setupBlockListener(blockedSites: string[]) {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const urls: string[] = tabs.map((x) => x.url)
-    const domain: string = cleanDomain(urls)
-    const url: string = cleanDomain(urls, true)
-
-    // not on a page (probably new tab)
-    if (domain === '') {
-      document.getElementById('curDomain').textContent = 'none.'
-      return
-    }
-
-    document.getElementById('curDomain').textContent = domain
-
-    // initial popup button configuration
-    let exact = false
-    if (blockedSites.includes(domain)) {
-      updateButton(false)
-    } else if (blockedSites.includes(url)) {
-      updateButton(false)
-      exact = true
-    }
-
-    //document.getElementById('block').innerHTML = getButtonText(domain, url, blockedSites)
-    document.getElementById('block').addEventListener('click', () => {
-      const port: chrome.runtime.Port = chrome.runtime.connect({
-        name: 'blockFromPopup',
-      })
-
-      // toggle state text and update background script
-      const buttonText: string = document.getElementById('block').innerHTML
-      if (buttonText === 'block page.') {
-        port.postMessage({ unblock: false, siteURL: domain })
-        updateButton(false)
-      } else {
-        port.postMessage({ unblock: true, siteURL: exact ? url : domain })
-        updateButton(true)
-      }
-
-      // cleanup connection
-      port.disconnect()
-    })
-
-    document.getElementById('blockPath').addEventListener('click', () => {
-      const port: chrome.runtime.Port = chrome.runtime.connect({
-        name: 'blockFromPopup',
-      })
-
-      // toggle state text and update background script
-      const buttonText: string = document.getElementById('block').innerHTML
-      if (buttonText === 'block page.') {
-        port.postMessage({ unblock: false, siteURL: url })
-        updateButton(false)
-      }
-
-      // cleanup connection
-      port.disconnect()
-    })
-
-    document.getElementById('blockPath').style.display = 'none'
-
-    /* When the user clicks on the button, 
-    toggle between hiding and showing the dropdown content */
-    document.getElementById('dropdown').addEventListener('click', () => {
-      const dropdown: HTMLElement = document.getElementById('blockPath')
-      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none'
-    })
-
-    // Close the dropdown if the user clicks outside of it
-    window.onclick = function (event: MouseEvent) {
-      const target: HTMLElement = event.target as HTMLElement
-      if (!target.matches('#dropdown')) {
-        const dropdown: HTMLElement = document.getElementById('blockPath')
-        dropdown.style.display = 'none'
-      }
-    }
-  })
+function startCountdown(expiry: number): void {
+  const tick = () => {
+    const seconds = Math.max(0, Math.round((expiry - Date.now()) / 1000))
+    const minutes = Math.floor(seconds / 60)
+    const rest = String(seconds % 60).padStart(2, '0')
+    setState(seconds > 0 ? `open for ${minutes}:${rest} more.` : 'blocked.')
+    if (seconds === 0) window.clearInterval(countdown)
+  }
+  tick()
+  countdown = window.setInterval(tick, 1000)
 }

@@ -1,120 +1,135 @@
 <!DOCTYPE html>
-<html>
-	<head>
-		<link rel="stylesheet" href="/res/common.css">
-		<link rel="stylesheet" href="/res/fonts.css">
-		<script src="/src/options.js"></script>
-	</head>
-	<body id="reflectMain">
-		<div class="contentCol">
-			<div class="options_panel">
-				<h2>options.</h2>
-				<p>buttons and knobs to customize your reflect experience.</p>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflect. options</title>
+    <link rel="stylesheet" href="/res/theme.css" />
+    <link rel="stylesheet" href="/res/pages/options.css" />
+    <script src="/src/options.js" defer></script>
+  </head>
+  <body>
+    <main class="sheet">
+      <header class="sheet-head">
+        <h1 class="wordmark">options.</h1>
+        <p>changes save as you make them. <span class="saved" id="saved" aria-live="polite"></span></p>
+      </header>
 
-				<table>
-					<tr>
-						<td style="width:75%">
-							<h3 class="setting">enable blobs.</h3>
-							<p class="subtext">whether to render the interactive blobs on the block page.</p>
-						</td>
-						<td>
-							<input class='toggle' id='enableBlobs' type='checkbox'>
-							<label class='toggle-button' for='enableBlobs'></label>
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">enable 3D.</h3>
-							<p class="subtext">whether to enable the 3D-like effect on the blobs on the block page.</p>
-						</td>
-						<td>
-							<input class='toggle' id='enable3D' type='checkbox'>
-							<label class='toggle-button' for='enable3D'></label>
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">whitelist time.</h3>
-							<p class="subtext">time allowed on a website after successful intent (minutes).</p>
-						</td>
-						<td>
-							<input id="whitelistTime" type="number" min="0">
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">number of intent entries.</h3>
-							<p class="subtext">number of most recent intents shown in the analytics panel.</p>
-						</td>
-						<td>
-							<input id="numIntentEntries" type="number" min="0">
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">min intent length.</h3>
-							<p class="subtext">minimum length of intent. anything shorter will be rejected.</p>
-						</td>
-						<td>
-							<input id="minIntentLength" type="number" min="0">
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">custom message.</h3>
-							<p class="subtext">text that is shown every time the block page is loaded.</p>
-						</td>
-						<td>
-							<input id="customMessage" class="short" type="text" placeholder="hey! what are you here for?">
-						</td>
-					</tr>
-					<tr>
-						<td>
-							<h3 class="setting">block page sensitivity.</h3>
-							<p class="subtext">how likely the model is to block an entered intent. 0% is always allow and 100% is never allow.</p>
-						</td>
-						<td>
-							<input type="range" min="0" max="1" value="0.5" step="0.01" id="thresholdSlider">
-							<p id="thresholdSliderValue">0.5</p>
-						</td>
-					</tr>
-					<tr>
-						<td>
-						</td>
-						<td>
-							<input id="save" class="ripple" type="submit" value="save">
-							<p id="statusMessage">
-								<span>&nbsp;</span>
-								<span id="statusContent"></span>
-							</p>
-						</td>
-					</tr>
-				</table>
-			</div>
-			<div class="shortcuts_panel">
-				<h2>
-					<a href="#" class="external" id="linkToShortcuts">
-						keyboard shorcuts.
-					</a>
-				</h2>
-				<p>toggles reflect on/off.</p>
-			</div>
-			<div class="sites_panel">
-				<h2>sites.</h2>
-				<p>a list of sites you would like to be more mindful of. sites added here will have the reflect prompt shown to you.</p>
-					<div id="addSite">
-						<input type="text" id="urlInput" />
-						<input class="urlSubmit ripple" type="submit" id="add" value="add site">
-					</div>
-				<div id="filterList"></div>
-			</div>
+      <section aria-labelledby="sitesTitle">
+        <h2 id="sitesTitle">sites.</h2>
+        <p class="lede">reflect asks for a reason before opening any of these.</p>
+        <form class="add-site" id="addSite">
+          <label class="visually-hidden" for="siteInput">site to add</label>
+          <input class="input" id="siteInput" type="text" placeholder="example.com" autocomplete="off" spellcheck="false" />
+          <button class="button primary" type="submit">add site.</button>
+        </form>
+        <p class="form-error" id="siteError" aria-live="polite"></p>
+        <ul class="site-list" id="siteList"></ul>
+      </section>
 
-			<div class="analytics_panel">
-				<br>
-				<h2>analytics.</h2>
-				<p>a list showing your most recent entries.</p>
-				<div class='previousIntents' id="previousIntents"></div>
-			</div>
-		</div>
-	</body>
+      <section aria-labelledby="settingsTitle">
+        <h2 id="settingsTitle">settings.</h2>
+
+        <div class="setting">
+          <div>
+            <h3><label for="whitelistTime">time allowed.</label></h3>
+            <p>minutes a site stays open after you give a good reason.</p>
+          </div>
+          <input class="input number" id="whitelistTime" type="number" min="1" max="240" />
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3><label for="minIntentLength">shortest reason.</label></h3>
+            <p>reasons with this many words or fewer get sent back.</p>
+          </div>
+          <input class="input number" id="minIntentLength" type="number" min="0" max="20" />
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3><label for="customMessage">question.</label></h3>
+            <p>what the block page asks you.</p>
+          </div>
+          <input class="input text" id="customMessage" type="text" placeholder="hey! what are you here for?" />
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3><label for="predictionThreshold">strictness.</label></h3>
+            <p>how sure reflect needs to be that a reason is genuine. at 0% every reason gets through, at 100% none do.</p>
+          </div>
+          <div class="slider">
+            <input id="predictionThreshold" type="range" min="0" max="1" step="0.01" />
+            <output id="thresholdValue" for="predictionThreshold"></output>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3 id="smartTitle">smart model.</h3>
+            <p>a small language model that understands far more words than the original. it downloads about 23 MB once, then runs on your device. if it can't load, reflect uses the original model.</p>
+            <p class="status" id="smartModelStatus"></p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" role="switch" id="useSmartModel" aria-labelledby="smartTitle" />
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3 id="blobsTitle">blobs.</h3>
+            <p>the shapes that drift away from your cursor on the block page.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" role="switch" id="enableBlobs" aria-labelledby="blobsTitle" />
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3 id="shadedTitle">shaded blobs.</h3>
+            <p>gives the blobs soft 3D shading.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" role="switch" id="enable3D" aria-labelledby="shadedTitle" />
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="setting">
+          <div>
+            <h3><label for="numIntentEntries">reasons to remember.</label></h3>
+            <p>how many recent reasons to keep in the list below.</p>
+          </div>
+          <input class="input number" id="numIntentEntries" type="number" min="1" max="200" />
+        </div>
+      </section>
+
+      <section aria-labelledby="historyTitle">
+        <h2 id="historyTitle">recent reasons.</h2>
+        <p class="lede">what you told reflect, newest first.</p>
+        <table class="history" id="history">
+          <thead>
+            <tr>
+              <th scope="col">reason</th>
+              <th scope="col">site</th>
+              <th scope="col">result</th>
+              <th scope="col">when</th>
+            </tr>
+          </thead>
+          <tbody id="historyRows"></tbody>
+        </table>
+        <p class="empty" id="historyEmpty" hidden>nothing yet. reasons you give on the block page show up here.</p>
+      </section>
+
+      <section aria-labelledby="shortcutTitle">
+        <h2 id="shortcutTitle">keyboard shortcut.</h2>
+        <p class="lede" id="shortcutText"></p>
+        <p><button class="link-button" id="shortcutLink">change it in chrome.</button></p>
+      </section>
+    </main>
+  </body>
 </html>

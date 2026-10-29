@@ -1,118 +1,117 @@
-// storage.ts provides a thin wrapper around the chrome storage api to make it easier to read/write from it
-// you can also find helper functions that read/write to chrome storage
+// storage.ts wraps chrome.storage.sync: defaults, typed reads and writes, and
+// pure helpers for updating the lists reflect keeps.
+import { Intent, Settings, SettingsUpdate } from './types'
 
-import { Storage, Intent } from './types'
-import { addMinutes, cleanDomain } from './util'
+// sites blocked on a fresh install
+export const DEFAULT_BLOCKED_SITES: string[] = [
+  'facebook.com',
+  'x.com',
+  'instagram.com',
+  'youtube.com',
+]
 
-// helper function to retrive chrome storage object
-// usage:
-//
-// getStorage(null).then(storage => {
-//     ...
-// })
-export function getStorage(): Promise<Storage> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.sync.get(null, (storage) => {
-      if (chrome.runtime.lastError !== undefined) {
-        reject(chrome.runtime.lastError)
-      } else {
-        resolve(storage)
-      }
-    })
+// values used for anything missing from storage
+export const DEFAULTS: Settings = {
+  isEnabled: true,
+  enableBlobs: true,
+  enable3D: true,
+  blockedSites: [],
+  intentList: {},
+  customMessage: '',
+  whitelistedSites: {},
+  numIntentEntries: 20,
+  whitelistTime: 5,
+  predictionThreshold: 0.5,
+  intentModel: 'original',
+  minIntentLength: 3,
+}
+
+// numeric settings that older versions of reflect saved as strings
+const NUMBER_KEYS = [
+  'numIntentEntries',
+  'whitelistTime',
+  'predictionThreshold',
+  'minIntentLength',
+] as const
+
+// everything reflect stores, with defaults for anything missing
+export async function getStorage(): Promise<Settings> {
+  const stored: SettingsUpdate = await chrome.storage.sync.get<SettingsUpdate>(null)
+  // clone so callers that edit lists in place never touch DEFAULTS
+  const settings: Settings = { ...structuredClone(DEFAULTS), ...stored }
+  for (const key of NUMBER_KEYS) {
+    settings[key] = Number(settings[key])
+  }
+  return settings
+}
+
+export function setStorage(update: SettingsUpdate): Promise<void> {
+  return chrome.storage.sync.set(update)
+}
+
+export type SettingsChanges = {
+  [K in keyof Settings]?: { oldValue?: Settings[K]; newValue?: Settings[K] }
+}
+
+// call listener whenever settings change, from any page, the worker, or another synced device
+export function onSettingsChanged(listener: (changes: SettingsChanges) => void): void {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    // chrome types change values as unknown; storage.sync only ever holds Settings
+    if (area === 'sync') listener(changes as SettingsChanges)
   })
 }
 
-// helper function to set fields in chrome storage
-// usage:
-//
-// getStorage({enableBlobs: false}).then(storage => {
-//     ...
-// })
-export function setStorage(key: Storage): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.sync.set(key, () => {
-      if (chrome.runtime.lastError !== undefined) {
-        reject(chrome.runtime.lastError)
-      } else {
-        resolve()
-      }
-    })
-  })
+// ---- block list ----
+
+// add an entry to the block list; resolves false if it was empty or already there
+export async function addToBlocked(entry: string): Promise<boolean> {
+  const { blockedSites } = await getStorage()
+  if (entry === '' || blockedSites.includes(entry)) {
+    return false
+  }
+  await setStorage({ blockedSites: [...blockedSites, entry] })
+  return true
 }
 
-// Add a single url to blocklist (does nothing if url is already in list)
-export function addToBlocked(url: string, callback?: () => any): void {
-  getStorage().then((storage) => {
-    // url = cleanDomain([url]) === '' ? url : cleanDomain([url])
-    if (!storage.blockedSites.includes(url)) {
-      storage.blockedSites.push(url)
-      setStorage({ blockedSites: storage.blockedSites }).then(() => {
-        console.log(`${url} added to blocked sites`)
-        callback ? callback() : () => {}
-      })
-    }
-  })
+export async function removeFromBlocked(entry: string): Promise<void> {
+  const { blockedSites } = await getStorage()
+  await setStorage({ blockedSites: blockedSites.filter((e) => e !== entry) })
 }
 
-// Remove single url from blocklist (does nothing if url is not in list)
-export function removeFromBlocked(url: string): void {
-  getStorage().then((storage) => {
-    let blockedSites: string[] = storage.blockedSites
-    blockedSites = blockedSites.filter((e) => e !== url)
-    setStorage({ blockedSites: blockedSites }).then(() => {
-      console.log(`removed ${url} from blocked sites`)
-    })
-  })
+// ---- allowances: time a site stays open after a good reason ----
+
+type Allowances = Settings['whitelistedSites']
+
+// milliseconds left on a site's allowance, or 0 if it has none
+export function allowanceLeft(allowances: Allowances, site: string): number {
+  const expiry: string | undefined = allowances[site]
+  return expiry === undefined ? 0 : Math.max(0, new Date(expiry).getTime() - Date.now())
 }
 
-// Add a single url to whitelist with associated whitelist duration
-// (replaces any existing entries)
-export function addToWhitelist(url: string, minutes: number): void {
-  getStorage().then((storage) => {
-    let whitelistedSites: { [key: string]: string } = storage.whitelistedSites
-    let expiry: Date = addMinutes(new Date(), minutes)
-    whitelistedSites[url] = expiry.toJSON()
-
-    setStorage({ whitelistedSites: whitelistedSites }).then(() => {
-      console.log(`${url} added to whitelisted sites`)
-    })
-  })
+// allowances with this site open for `minutes` more, dropping any that have expired
+export function allowSite(
+  allowances: Allowances,
+  site: string,
+  minutes: number,
+  now: Date
+): Allowances {
+  const live = Object.entries(allowances).filter(([, expiry]) => new Date(expiry) > now)
+  const expiry: string = new Date(now.getTime() + minutes * 60_000).toJSON()
+  return { ...Object.fromEntries(live), [site]: expiry }
 }
 
-export function logIntentToStorage(
-  intentString: string,
-  intentDate: Date,
-  url: string,
-  accepted: string
-): void {
-  getStorage().then((storage) => {
-    let intentList: { [key: string]: Intent } = storage.intentList
+// ---- intent log ----
 
-    // getting oldest date value from intent list map
-    let oldest_date: Date = new Date()
-    for (const rawDate in intentList) {
-      const date: Date = new Date(rawDate)
-      if (date < oldest_date) {
-        oldest_date = date
-      }
-    }
-
-    // deleting oldest intent to keep intent count under limit
-    if (Object.keys(intentList).length > storage.numIntentEntries) {
-      console.log(`list full, popping ${oldest_date.toJSON()}`)
-      delete intentList[oldest_date.toJSON()]
-    }
-
-    // adding new intent and date to intent list
-    intentList[intentDate.toJSON()] = {
-      intent: intentString,
-      url: url,
-      accepted: accepted,
-    }
-
-    // saving intentList to chrome storage
-    setStorage({ intentList: intentList }).then(() => {
-      console.log(`logged intent "${intentString}"`)
-    })
-  })
+// the log with this entry added, keeping only the newest `max` entries.
+// keys are ISO dates, so they sort by time
+export function withIntent(
+  log: Settings['intentList'],
+  entry: Intent,
+  now: Date,
+  max: number
+): Settings['intentList'] {
+  const entries = [...Object.entries(log), [now.toJSON(), entry] as const].sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0
+  )
+  return Object.fromEntries(entries.slice(Math.max(0, entries.length - max)))
 }

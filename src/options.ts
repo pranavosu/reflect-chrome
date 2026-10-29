@@ -1,224 +1,224 @@
-import { addToBlocked, getStorage, setStorage } from './storage'
-import { Intent } from './types'
-import { cleanDomain, getElementFromForm } from './util'
+// options.ts drives the options page. Every control saves as soon as it
+// changes; the page re-renders whenever storage changes.
+import { watchSmartModelStatus } from './messages'
+import { entryFor } from './sites'
+import {
+  addToBlocked,
+  getStorage,
+  onSettingsChanged,
+  removeFromBlocked,
+  setStorage,
+} from './storage'
+import { Settings, SettingsUpdate } from './types'
+import { byId, showToggleShortcut } from './ui'
 
-const ENTER_KEY_CODE = 13
+document.addEventListener('DOMContentLoaded', async () => {
+  const storage = await getStorage()
+  fillControls(storage)
+  renderSites(storage)
+  renderHistory(storage)
+  bindControls()
+  bindSites()
+  showShortcut()
+  bindSmartModelStatus()
 
-// On page load, draw table and add button listener
-document.addEventListener('DOMContentLoaded', () => {
-  // setup button listeners and draw tables
-  drawFilterListTable()
-  drawIntentListTable()
-  setAddButtonListener()
-
-  document.getElementById('linkToShortcuts').addEventListener('click', function () {
-    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
+  onSettingsChanged(async (changes) => {
+    const sitesChanged = changes.blockedSites !== undefined
+    const historyChanged =
+      changes.intentList !== undefined || changes.numIntentEntries !== undefined
+    if (!sitesChanged && !historyChanged) return
+    const latest = await getStorage()
+    if (sitesChanged) renderSites(latest)
+    if (historyChanged) renderHistory(latest)
   })
-
-  // update threshold display value
-  const slider = document.getElementById('thresholdSlider') as HTMLInputElement
-  const display = document.getElementById('thresholdSliderValue')
-
-  const sliderToValue = (slider) => `${Math.round(+slider.value * 100)}%`
-  slider.oninput = () => {
-    display.innerHTML = sliderToValue(slider)
-  }
-
-  // set state of page based off of storage
-  getStorage().then((storage) => {
-    getElementFromForm('whitelistTime').value = storage.whitelistTime
-    getElementFromForm('numIntentEntries').value = storage.numIntentEntries
-    getElementFromForm('minIntentLength').value = storage.minIntentLength ?? 3
-    getElementFromForm('customMessage').value = storage.customMessage || ''
-    getElementFromForm('enableBlobs').checked = storage.enableBlobs ?? true
-    getElementFromForm('enable3D').checked = storage.enable3D ?? true
-    getElementFromForm('thresholdSlider').value = storage.predictionThreshold || 0.5
-    display.innerHTML = sliderToValue(slider)
-  })
-
-  // options listeners
-  document.getElementById('save').addEventListener('click', saveCurrentOptions)
 })
 
-function saveCurrentOptions(): void {
-  // get all form values
-  const whitelistTime: number = getElementFromForm('whitelistTime').value
-  const numIntentEntries: number = getElementFromForm('numIntentEntries').value
-  const minIntentLength: number = getElementFromForm('minIntentLength').value
-  const customMessage: string = getElementFromForm('customMessage').value
-  const enableBlobs: boolean = getElementFromForm('enableBlobs').checked
-  const enable3D: boolean = getElementFromForm('enable3D').checked
-  const predictionThreshold: number = getElementFromForm('thresholdSlider').value
+// ---- settings ----
 
-  setStorage({
-    numIntentEntries: numIntentEntries,
-    whitelistTime: whitelistTime,
-    customMessage: customMessage,
-    enableBlobs: enableBlobs,
-    enable3D: enable3D,
-    predictionThreshold: predictionThreshold,
-    minIntentLength: minIntentLength,
-  }).then(() => {
-    // Update status to let user know options were saved.
-    const status = document.getElementById('statusContent')
-    status.textContent = 'options saved.'
-    setTimeout(() => {
-      status.textContent = ''
-    }, 1500)
+function fillControls(storage: Settings): void {
+  byId<HTMLInputElement>('whitelistTime').value = String(storage.whitelistTime)
+  byId<HTMLInputElement>('minIntentLength').value = String(storage.minIntentLength)
+  byId<HTMLInputElement>('numIntentEntries').value = String(storage.numIntentEntries)
+  byId<HTMLInputElement>('customMessage').value = storage.customMessage
+  byId<HTMLInputElement>('predictionThreshold').value = String(storage.predictionThreshold)
+  byId<HTMLInputElement>('useSmartModel').checked = storage.intentModel === 'smart'
+  byId<HTMLInputElement>('enableBlobs').checked = storage.enableBlobs
+  byId<HTMLInputElement>('enable3D').checked = storage.enable3D
+  showThreshold()
+}
+
+let savedTimer = 0
+function save(values: SettingsUpdate): void {
+  setStorage(values).then(() => {
+    const saved = byId('saved')
+    saved.textContent = 'saved.'
+    window.clearTimeout(savedTimer)
+    savedTimer = window.setTimeout(() => (saved.textContent = ''), 1500)
   })
 }
 
-function updateButtonListeners(): void {
-  // get all buttons
-  const buttons = document.getElementsByTagName('button')
-  for (const button of <any>buttons) {
-    button.addEventListener('click', () => {
-      // get button ID
-      const id: number = parseInt(button.id[0])
+// read a number field, clamped to its min/max; null if it isn't a number yet
+function readNumber(id: string): number | null {
+  const input = byId<HTMLInputElement>(id)
+  const value = Math.round(Number(input.value))
+  if (input.value.trim() === '' || Number.isNaN(value)) return null
+  const clamped = Math.min(Number(input.max), Math.max(Number(input.min), value))
+  input.value = String(clamped)
+  return clamped
+}
 
-      // get url
-      const url: string = document.getElementById(button.id[0] + 'site')?.innerHTML
+function showThreshold(): void {
+  const value = Number(byId<HTMLInputElement>('predictionThreshold').value)
+  byId('thresholdValue').textContent = `${Math.round(value * 100)}%`
+}
 
-      // get blockedSites
-      getStorage().then((storage) => {
-        const blockedSites: string[] = storage.blockedSites
-
-        // remove by ID
-        blockedSites.splice(id, 1)
-
-        // sync with chrome storage
-        setStorage({ blockedSites: blockedSites }).then(() => {
-          console.log(`removed ${url} from blocked list`)
-          drawFilterListTable()
-        })
-      })
+function bindControls(): void {
+  for (const id of ['whitelistTime', 'minIntentLength', 'numIntentEntries'] as const) {
+    byId<HTMLInputElement>(id).addEventListener('change', () => {
+      const value = readNumber(id)
+      if (value !== null) save({ [id]: value })
     })
+  }
+
+  let messageTimer = 0
+  const message = byId<HTMLInputElement>('customMessage')
+  message.addEventListener('input', () => {
+    window.clearTimeout(messageTimer)
+    messageTimer = window.setTimeout(() => save({ customMessage: message.value.trim() }), 400)
+  })
+
+  const threshold = byId<HTMLInputElement>('predictionThreshold')
+  threshold.addEventListener('input', showThreshold)
+  threshold.addEventListener('change', () => save({ predictionThreshold: Number(threshold.value) }))
+
+  const smart = byId<HTMLInputElement>('useSmartModel')
+  smart.addEventListener('change', () =>
+    save({ intentModel: smart.checked ? 'smart' : 'original' })
+  )
+  for (const id of ['enableBlobs', 'enable3D'] as const) {
+    const toggle = byId<HTMLInputElement>(id)
+    toggle.addEventListener('change', () => save({ [id]: toggle.checked }))
   }
 }
 
-function generateWebsiteDiv(id: number, site: string): string {
-  return `<tr>
-    <td style="width: 95%"><p class="urlDisplay" id=${id}>${site}</p></td>
-    <td style="width: 5%"><button id=${id}>&times;</button></td>
-    </tr>`
-}
+// ---- sites ----
 
-function generateIntentDiv(
-  id: number,
-  intent: string,
-  date: Date,
-  url: string,
-  accepted: string
-): string {
-  // reformatting date to only include month, date, and 12 hour time
-  const formattedDate: string = date.toLocaleDateString('default', {
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true,
-  })
+function bindSites(): void {
+  byId<HTMLFormElement>('addSite').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const input = byId<HTMLInputElement>('siteInput')
+    // a pasted URL with a path blocks just that page
+    const site: string | undefined = entryFor(input.value)
+    const error = byId('siteError')
 
-  // creating display table for intents and dates
-  return `<tr>
-      <td style="width: 20%"><p class="intentDisplay" id=${id}>${url}</p></td>
-      <td style="width: 40%"><p class="intentDisplay" id=${id}>${intent}</p></td>
-      <td style="width: 15%"><p class="intentDisplay" id=${id}>${accepted}</p></td>
-      <td style="width: 25%"><p class="intentDisplay" id=${id}>${formattedDate}</p></td>
-    </tr>`
-}
-
-function drawFilterListTable(): void {
-  getStorage().then((storage) => {
-    const blockedSites: string[] = storage.blockedSites
-
-    // appending row for each addiitonal blocked site
-    const tableContent: string = blockedSites.reduce((table, site, cur_id) => {
-      table += generateWebsiteDiv(cur_id, site)
-      return table
-    }, '')
-    // generates new line in table for new intent
-    const table: string = `<table class="hover shadow styled">${tableContent}</table>`
-
-    // adds table to html
-    const filterList: HTMLElement = document.getElementById('filterList')
-    if (filterList != null) {
-      filterList.innerHTML = table
+    if (site === undefined) {
+      error.textContent = 'enter a site like youtube.com.'
+      return
     }
-    // adding listener to "x"
-    updateButtonListeners()
+    if (!(await addToBlocked(site))) {
+      error.textContent = `${site} is already on the list.`
+      return
+    }
+    error.textContent = ''
+    input.value = ''
+    input.focus()
   })
 }
 
-function drawIntentListTable(): void {
-  getStorage().then((storage) => {
-    const intentList: { [key: string]: Intent } = storage.intentList
+function renderSites(storage: Settings): void {
+  const list = byId('siteList')
+  const sites: string[] = storage.blockedSites
+  list.replaceChildren()
 
-    // generate table element
-    let table: string = `<table id="intentList" class="hover shadow styled">
-        <tr>
-        <th id="urlHeader" style="width: 20%">url</th>
-        <th style="width: 40%">intent</th>
-        <th style="width: 15%">accepted?</th>
-        <th style="width: 25%">date</th>
-      </tr>`
-
-    let cur_id: number = 0
-    // iter dates in intentList
-    for (const rawDate in intentList) {
-      // if number of entries is less than max
-      if (cur_id < storage.numIntentEntries) {
-        // parse fields from intentlist[rawDate]
-        const date: Date = new Date(rawDate)
-        const intent: string = intentList[rawDate].intent
-        const url: string = intentList[rawDate].url
-        const accepted: string = intentList[rawDate].accepted ? intentList[rawDate].accepted : 'n/a'
-
-        // append table row with this info
-        table += generateIntentDiv(cur_id, intent, date, url, accepted)
-        cur_id++
-      }
-    }
-    // generates new line in table for new intent
-    table += '</table>'
-
-    // insert table into html
-    const previousIntents: HTMLElement = document.getElementById('previousIntents')
-    if (previousIntents != null) {
-      previousIntents.innerHTML = table
-    }
-  })
-}
-
-// sets event listeners for add new url operations
-function setAddButtonListener(): void {
-  const urlInputElement: HTMLElement = document.getElementById('urlInput')
-
-  // add key listener to submit new url on <ENTER> pressed
-  urlInputElement.addEventListener('keypress', (event) => {
-    if (event.keyCode === ENTER_KEY_CODE) {
-      addUrlToFilterList()
-    }
-  })
-
-  // add click listener to add URL button
-  const addButton: HTMLElement = document.getElementById('add')
-  addButton.addEventListener('click', () => {
-    addUrlToFilterList()
-  })
-}
-
-function addUrlToFilterList(): void {
-  // get urlInput
-  const urlInput: HTMLFormElement = document.getElementById('urlInput') as HTMLFormElement
-
-  // see if value is non-empty
-  if (urlInput.value !== '') {
-    const url: string = urlInput.value
-    const cleanUrl = cleanDomain([url], true) === '' ? url : cleanDomain([url], true)
-    addToBlocked(cleanUrl, () => {
-      urlInput.value = ''
-      drawFilterListTable()
-    })
+  if (sites.length === 0) {
+    const empty = document.createElement('li')
+    empty.className = 'empty'
+    empty.textContent = 'no sites yet. add one above, like youtube.com.'
+    list.append(empty)
+    return
   }
+
+  for (const site of sites) {
+    const item = document.createElement('li')
+    const name = document.createElement('span')
+    name.textContent = site
+    const remove = document.createElement('button')
+    remove.className = 'remove'
+    remove.textContent = 'remove.'
+    remove.setAttribute('aria-label', `remove ${site}`)
+    remove.addEventListener('click', () => removeFromBlocked(site))
+    item.append(name, remove)
+    list.append(item)
+  }
+}
+
+// ---- recent reasons ----
+
+function formatWhen(date: Date): string {
+  const sameDay = date.toDateString() === new Date().toDateString()
+  const time = date
+    .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    .toLowerCase()
+  if (sameDay) return `today, ${time}`
+  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toLowerCase()
+  return `${day}, ${time}`
+}
+
+function renderHistory(storage: Settings): void {
+  const entries = Object.entries(storage.intentList)
+    .sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
+    .slice(0, storage.numIntentEntries)
+
+  byId('history').hidden = entries.length === 0
+  byId('historyEmpty').hidden = entries.length !== 0
+
+  const rows = entries.map(([rawDate, entry]) => {
+    const row = document.createElement('tr')
+    const cell = (text: string, className?: string) => {
+      const td = document.createElement('td')
+      td.textContent = text
+      if (className) td.className = className
+      return td
+    }
+
+    const outcome = document.createElement('span')
+    const accepted = entry.accepted === 'yes'
+    outcome.className = `outcome ${accepted ? 'yes' : 'no'}`
+    outcome.textContent =
+      entry.accepted === undefined ? 'unknown' : accepted ? 'let in' : 'sent back'
+    const outcomeCell = cell('')
+    outcomeCell.append(outcome)
+
+    row.append(
+      cell(entry.intent, 'reason'),
+      cell(entry.url),
+      outcomeCell,
+      cell(formatWhen(new Date(rawDate)))
+    )
+    return row
+  })
+  byId('historyRows').replaceChildren(...rows)
+}
+
+// ---- smart model status ----
+
+function bindSmartModelStatus(): void {
+  const el = byId('smartModelStatus')
+  watchSmartModelStatus((status) => {
+    if (status === undefined) el.textContent = ''
+    else if (status.state === 'loading') el.textContent = `loading the model… ${status.progress}%`
+    else if (status.state === 'ready') el.textContent = 'ready.'
+    else
+      el.textContent =
+        "couldn't load the model, so reflect is using the original one for now. it tries again the next time a block page opens."
+  })
+}
+
+// ---- keyboard shortcut ----
+
+function showShortcut(): void {
+  showToggleShortcut(byId('shortcutText'), 'no shortcut is set for turning reflect on or off.')
+  byId('shortcutLink').addEventListener('click', () =>
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
+  )
 }
